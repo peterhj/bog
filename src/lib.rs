@@ -152,6 +152,17 @@ impl Truename {
     Cryptoname{public: self.public.clone()}
   }
 
+  pub fn comprehend_own_name(&self, word: &Oldword) -> Substance {
+    self.comprehend(&self.public, word)
+  }
+
+  pub fn comprehend<A: AsRef<[u8]>>(&self, thing: A, word: &Oldword) -> Substance {
+    match sign_verify(word.as_ref(), thing.as_ref(), self.public.as_ref()) {
+      Err(_) => Substance::Gibberish,
+      Ok(()) => Substance::Oldspoken,
+    }
+  }
+
   pub fn speak_own_name(&self) -> Oldword {
     self.speak(&self.public)
   }
@@ -169,6 +180,27 @@ impl Truename {
 pub enum Oldname {
   True(Truename),
   Crypto(Cryptoname),
+}
+
+impl Oldname {
+  #[inline]
+  fn _public(&self) -> &CryptoBuf {
+    match self {
+      &Oldname::True(ref truename) => &truename.public,
+      &Oldname::Crypto(ref cryptoname) => &cryptoname.public,
+    }
+  }
+
+  pub fn comprehend_own_name(&self, word: &Oldword) -> Substance {
+    self.comprehend(self._public(), word)
+  }
+
+  pub fn comprehend<A: AsRef<[u8]>>(&self, thing: A, word: &Oldword) -> Substance {
+    match sign_verify(word.as_ref(), thing.as_ref(), self._public().as_ref()) {
+      Err(_) => Substance::Gibberish,
+      Ok(()) => Substance::Oldspoken,
+    }
+  }
 }
 
 pub enum Substance {
