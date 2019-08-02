@@ -1,6 +1,7 @@
 extern crate dirs;
 extern crate monosodium;
 
+use dirs::{home_dir};
 use monosodium::{init_sodium, gen_sign_keypair, sign_buflen, sign, sign_verify};
 use monosodium::util::{CryptoBuf};
 use monosodium::util::base64::{Base64Config};
@@ -13,7 +14,7 @@ use std::path::{PathBuf};
 
 #[cfg(target_family = "unix")]
 fn default_home() -> Option<PathBuf> {
-  let user_home = dirs::home_dir();
+  let user_home = home_dir();
   user_home.map(|d| d.join(".bog"))
 }
 
@@ -51,6 +52,10 @@ impl UnixenConfig {
     self.home.as_ref().map(|d| d.join("truenames"))
   }
 
+  pub fn composted_dir(&self) -> Option<PathBuf> {
+    self.home.as_ref().map(|d| d.join(".composted"))
+  }
+
   pub fn root_path(&self) -> Option<PathBuf> {
     self.home.as_ref().map(|d| d.join("root"))
   }
@@ -83,11 +88,19 @@ impl Tome {
         set_permissions(&d, Permissions::from_mode(0o700)).ok();
       }
     }
+    match unix.composted_dir() {
+      None => return None,
+      Some(d) => {
+        create_dir_all(&d).ok();
+        set_permissions(&d, Permissions::from_mode(0o700)).ok();
+      }
+    }
     init_sodium();
     Some(Tome{unix})
   }
 
   pub fn reroot(&mut self) -> Option<Truename> {
+    // TODO: compost the old root.
     let kp = match gen_sign_keypair() {
       Err(_) => return None,
       Ok(kp) => kp,
@@ -110,6 +123,50 @@ impl Tome {
   }
 }
 
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum Loudname {
+  Earth = 0,
+  Ged   = 0xff,
+}
+
+impl Loudname {
+  pub fn rune(&self) -> [u8; 1] {
+    let x = *self as u8;
+    [x]
+  }
+}
+
+#[derive(Clone, Copy)]
+#[repr(u16)]
+pub enum Eraname {
+  Rei   = 0,
+}
+
+impl Eraname {
+  pub fn runes(&self) -> [u8; 2] {
+    let x = *self as u16;
+    let runes: [u8; 2] = u16::to_le_bytes(x);
+    runes
+  }
+}
+
+pub struct Usename(Box<[u8]>);
+
+pub fn usename<A: AsRef<[u8]>>(runes: A) -> Option<Usename> {
+  let runes = runes.as_ref();
+  if runes.len() <= 2 || runes.len() >= sign_buflen() {
+    return None;
+  }
+  Some(Usename(runes.to_owned().into()))
+}
+
+impl Usename {
+  pub fn runes(&self) -> &[u8] {
+    &*self.0
+  }
+}
+
 pub struct Cryptoname {
   public:   CryptoBuf,
 }
@@ -122,14 +179,14 @@ impl Cryptoname {
     Ok(())
   }
 
-  pub fn comprehend_own_name(&self, word: &Oldword) -> Substance {
-    self.comprehend(&self.public, word)
+  pub fn know_own_name(&self, word: &Oldword) -> Stuff {
+    self.know(&self.public, word)
   }
 
-  pub fn comprehend<A: AsRef<[u8]>>(&self, thing: A, word: &Oldword) -> Substance {
-    match sign_verify(word.as_ref(), thing.as_ref(), self.public.as_ref()) {
-      Err(_) => Substance::Gibberish,
-      Ok(()) => Substance::Oldspoken,
+  pub fn know<A: AsRef<[u8]>>(&self, runes: A, word: &Oldword) -> Stuff {
+    match sign_verify(word.as_ref(), runes.as_ref(), self.public.as_ref()) {
+      Err(_) => Stuff::Gibberish,
+      Ok(()) => Stuff::Oldspoken,
     }
   }
 }
@@ -152,14 +209,14 @@ impl Truename {
     Cryptoname{public: self.public.clone()}
   }
 
-  pub fn comprehend_own_name(&self, word: &Oldword) -> Substance {
-    self.comprehend(&self.public, word)
+  pub fn know_own_name(&self, word: &Oldword) -> Stuff {
+    self.know(&self.public, word)
   }
 
-  pub fn comprehend<A: AsRef<[u8]>>(&self, thing: A, word: &Oldword) -> Substance {
-    match sign_verify(word.as_ref(), thing.as_ref(), self.public.as_ref()) {
-      Err(_) => Substance::Gibberish,
-      Ok(()) => Substance::Oldspoken,
+  pub fn know<A: AsRef<[u8]>>(&self, runes: A, word: &Oldword) -> Stuff {
+    match sign_verify(word.as_ref(), runes.as_ref(), self.public.as_ref()) {
+      Err(_) => Stuff::Gibberish,
+      Ok(()) => Stuff::Oldspoken,
     }
   }
 
@@ -167,9 +224,9 @@ impl Truename {
     self.speak(&self.public)
   }
 
-  pub fn speak<A: AsRef<[u8]>>(&self, thing: A) -> Oldword {
+  pub fn speak<A: AsRef<[u8]>>(&self, runes: A) -> Oldword {
     let mut word = Oldword::silent();
-    match sign(word.as_mut(), thing.as_ref(), self.secret.as_ref()) {
+    match sign(word.as_mut(), runes.as_ref(), self.secret.as_ref()) {
       Err(_) => panic!(),
       Ok(()) => {}
     }
@@ -191,19 +248,19 @@ impl Oldname {
     }
   }
 
-  pub fn comprehend_own_name(&self, word: &Oldword) -> Substance {
-    self.comprehend(self._public(), word)
+  pub fn know_own_name(&self, word: &Oldword) -> Stuff {
+    self.know(self._public(), word)
   }
 
-  pub fn comprehend<A: AsRef<[u8]>>(&self, thing: A, word: &Oldword) -> Substance {
-    match sign_verify(word.as_ref(), thing.as_ref(), self._public().as_ref()) {
-      Err(_) => Substance::Gibberish,
-      Ok(()) => Substance::Oldspoken,
+  pub fn know<A: AsRef<[u8]>>(&self, runes: A, word: &Oldword) -> Stuff {
+    match sign_verify(word.as_ref(), runes.as_ref(), self._public().as_ref()) {
+      Err(_) => Stuff::Gibberish,
+      Ok(()) => Stuff::Oldspoken,
     }
   }
 }
 
-pub enum Substance {
+pub enum Stuff {
   Oldspoken,
   Gibberish,
 }
